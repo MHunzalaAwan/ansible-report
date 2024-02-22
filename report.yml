@@ -30,17 +30,17 @@
       state: present
     delegate_to: localhost
     run_once: true
-    - name: Gather facts for all hosts (retry unreachable)
-      ansible.builtin.setup:
-      register: all_hosts
-      retries: 3
-      delay: 5
+   - name: Gather facts for all hosts (retry unreachable)
+     ansible.builtin.setup:
+     register: all_hosts
+     retries: 3
+     delay: 5
 
-    - name: Identify unreachable and failed hosts
-      set_fact:
-        unreachable_hosts: "{{ hostvars[item]['ansible_status'] is not defined ? item : {} }}"
-        failed_hosts: "{{ hostvars[item]['failures'] | length > 0 ? item : {} }}"
-      loop: "{{ all_hosts.results }}"
+   - name: Identify unreachable and failed hosts
+     set_fact:
+       unreachable_hosts: "{{ hostvars[item]['ansible_status'] is not defined ? item : {} }}"
+       failed_hosts: "{{ hostvars[item]['failures'] | length > 0 ? item : {} }}"
+     loop: "{{ all_hosts.results }}"
  
   - name: Build out CSV file
     ansible.builtin.lineinfile:
