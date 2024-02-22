@@ -34,10 +34,11 @@
             distro: "{{ item.ansible_distribution_version }}"
             kernel: "{{ item.ansible_kernel }}"
             # Extract reboot info only for successful hosts
-            reboot: "{{ item.msg | regex_replace('^.* (.*)$', '\\1') | default('') }}" if item.status == 'success'
+            reboot: "{{ item.msg | regex_replace('^.* (.*)$', '\\1') | default('') }}"
             status: "{{ item.status }}"
           vars:
             item: "{{ all_hosts.results }}"
+          when: item.status == 'success'
         - name: Add host entry to CSV
           ansible.builtin.lineinfile:
             dest: "{{ csv_path }}/{{ csv_filename }}"
