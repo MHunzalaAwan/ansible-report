@@ -1,76 +1,70 @@
 ---
-- name: Generate an HTML report from jinja template
+- name: Generate and email HTML patching report
   hosts: all
   gather_facts: true
   vars:
-    #email settings
-    email_subject: Patching Report
-    email_host: smtphost
+    # Email settings
+    email_subject: Patching Report - {{ inventory_hostname }}
+    email_host: smtphost  # Replace with your SMTP server hostname
     email_from: system@email.com
     email_to: user@email.com
-    unreachable_hosts: {}
-    failed_hosts: {}
 
-
-    #random settings
+    # Report settings
     csv_path: /tmp
     csv_filename: report.csv
-    headers: Hostname,Distro Ver,Kernel Ver,Last Rebooted
+    headers:
+      - Hostname
+      - Distro Version
+      - Kernel Version
+      - Last Rebooted
+    template_path: templates/report.html.j2  # Replace with your template location
+    jinja2_env:
+      date_format: "%Y-%m-%d %H:%M:%S"  # Customize date formatting as needed
 
   tasks:
-  - name: Gather last reboot
-    ansible.builtin.shell: last reboot | grep -m1 "" | awk '{ print $1, $6, $7, $8 }'
-    register: rebooted
+    - name: Gather last reboot time
+      ansible.builtin.shell: last reboot | grep -m1 "" | awk '{ print $1, $6, $7, $8 }'
+      register: rebooted
 
-  - name: Save CSV headers
-    ansible.builtin.lineinfile:
-      dest: "{{ csv_path }}/{{ csv_filename }}"
-      line: "{{ headers }}"
-      create: true
-      state: present
-    delegate_to: localhost
-    run_once: true
-   - name: Gather facts for all hosts (retry unreachable)
-     ansible.builtin.setup:
-     register: all_hosts
-     retries: 3
-     delay: 5
+    - name: Save CSV headers (optional, only needed if creating a new CSV file)
+      ansible.builtin.lineinfile:
+        dest: "{{ csv_path }}/{{ csv_filename }}"
+        line: "{{ item }}"
+        create: yes
+        state: present
+        delegate_to: localhost
+        loop: "{{ headers }}"
+        when: not lookup('file', "{{ csv_path }}/{{ csv_filename }}" | default(false))
 
-   - name: Identify unreachable and failed hosts
-     set_fact:
-       unreachable_hosts: "{{ hostvars[item]['ansible_status'] is not defined ? item : {} }}"
-       failed_hosts: "{{ hostvars[item]['failures'] | length > 0 ? item : {} }}"
-     loop: "{{ all_hosts.results }}"
- 
-  - name: Build out CSV file
-    ansible.builtin.lineinfile:
-      dest: "{{ csv_path }}/{{ csv_filename }}"
-      line: "{{ inventory_hostname }},{{ ansible_distribution_version }},{{ ansible_kernel }},{{ rebooted.stdout }},{{ unreachable_hosts[inventory_hostname] is defined ? 'UNREACHABLE' : '' }},{{ failed_hosts[inventory_hostname] is defined ? failed_hosts[inventory_hostname][0]['msg'] : '' "
-      create: true
-      state: present
-    delegate_to: localhost
+    - name: Build out CSV file with current host information
+      ansible.builtin.lineinfile:
+        dest: "{{ csv_path }}/{{ csv_filename }}"
+        line: "{{ inventory_hostname }},{{ ansible_distribution_version }},{{ ansible_kernel }},{{ rebooted.stdout }}"
+        create: yes
+        state: present
+        delegate_to: localhost
 
-  - name: Read in CSV to variable
-    community.general.read_csv:
-      path: "{{ csv_path }}/{{ csv_filename }}"
-    register: csv_file
-    delegate_to: localhost
-    run_once: true
+    - name: Read CSV to variable (optional, if using CSV in the report)
+      community.general.read_csv:
+        path: "{{ csv_path }}/{{ csv_filename }}"
+        register: csv_file
+        delegate_to: localhost
+        when: lookup('file', "{{ csv_path }}/{{ csv_filename }}" | default(false))
 
-#  - name: debug csv_file
-#    debug:
-#      var: csv_file
-#    run_once: true
+    - name: Template report with Jinja2
+      set_fact:
+        report_html: "{{ lookup('template', template_path, csv_file=csv_file.results) }}"
 
-  - name: Send Email
-    community.general.mail:
-      host: "{{ email_host }}"
-      from: "{{ email_from }}"
-      port: 25
-      to: "{{ email_to }}"
-      subject: "[Ansible] {{ email_subject }}"
-      body: "{{ lookup('template', 'report.html.j2') }}"
-      attach: "{{ csv_path }}/{{ csv_filename }}"
-      subtype: html
-    delegate_to: localhost
-    run_once: true
+    - name: Send email with report (HTML and CSV attachments)
+      community.general.mail:
+        host: "{{ email_host }}"
+        from: "{{ email_from }}"
+        port: 25  # Adjust port if needed, e.g., 587 for TLS
+        to: "{{ email_to }}"
+        subject: "{{ email_subject }}"
+        body: "{{ report_html }}"
+        attach:
+          - "{{ csv_path }}/{{ csv_filename }}"
+          - "{{ template_path }}"  # Optionally attach the Jinja2 template for reference
+        subtype: html
+        delegate_to: localhost
