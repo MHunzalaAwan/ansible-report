@@ -1,5 +1,5 @@
 ---
-- name: Generate and email HTML patching report
+- name: Generate and email HTML patching report with unreachable/failed details
   hosts: all
   gather_facts: true
   vars:
@@ -17,6 +17,8 @@
       - Distro Version
       - Kernel Version
       - Last Rebooted
+      - Status
+      - Reason (if applicable)
     template_path: templates/report.html.j2  # Replace with your template location
     jinja2_env:
       date_format: "%Y-%m-%d %H:%M:%S"  # Customize date formatting as needed
@@ -36,13 +38,18 @@
         loop: "{{ headers }}"
         when: not lookup('file', "{{ csv_path }}/{{ csv_filename }}" | default(false))
 
-    - name: Build out CSV file with current host information
+    - name: Build out CSV file with current host information and status
       ansible.builtin.lineinfile:
         dest: "{{ csv_path }}/{{ csv_filename }}"
-        line: "{{ inventory_hostname }},{{ ansible_distribution_version }},{{ ansible_kernel }},{{ rebooted.stdout }}"
+        line: "{{ inventory_hostname }},{{ ansible_distribution_version }},{{ ansible_kernel }},{{ rebooted.stdout }},{{ hostvars[inventory_hostname]['status'] }},{{ hostvars[inventory_hostname]['reason'] }}"
         create: yes
         state: present
         delegate_to: localhost
+        when: hostvars[inventory_hostname] is defined  # Skip hosts without variables set
+
+    - name: Set unreachable/failed host details based on facts
+      set_fact:
+        hostvars: "{{ hostvars | combine(dict(ansible_play_hosts_all.difference(ansible_play_hosts).dict(), status='UNREACHABLE', reason='Connection failed')) }}"
 
     - name: Read CSV to variable (optional, if using CSV in the report)
       community.general.read_csv:
@@ -65,6 +72,6 @@
         body: "{{ report_html }}"
         attach:
           - "{{ csv_path }}/{{ csv_filename }}"
-          - "{{ template_path }}"  # Optionally attach the Jinja2 template for reference
+          ##- "{{ template_path }}"  # Optionally attach the Jinja2 template for reference
         subtype: html
         delegate_to: localhost
